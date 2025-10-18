@@ -27,6 +27,32 @@
 
 后端健康检查接口：http://localhost:4000/healthz
 
+### 网关与密钥（已实现基础能力）
+
+- 管理端接口：
+  - GET http://localhost:4000/apis 列出 API
+  - POST http://localhost:4000/apis 创建 API（字段：name, method, path, status）
+  - GET http://localhost:4000/keys 列出调用密钥
+  - POST http://localhost:4000/keys 创建密钥（字段：name, rateLimitPerMin）
+  - POST http://localhost:4000/keys/:id/rotate 重置密钥值
+  - GET http://localhost:4000/logs 最近请求日志
+  - GET http://localhost:4000/stats 基本调用统计
+
+- 网关调用：
+  - 路由前缀：/gateway/
+  - 认证方式：请求头 x-api-key: <密钥值>
+  - 根据已注册的 API（method + path，path 支持 :id 这类参数）匹配并返回回显 Mock 响应
+  - 示例：
+
+    curl -X GET "http://localhost:4000/gateway/users/123?foo=bar" \
+      -H "x-api-key: <从 /keys 获取的 key>"
+
+- 速率限制：
+  - 每个密钥独立的每分钟限速（默认 60 次/分钟，可在创建密钥时指定）
+
+- 注意：
+  - 目前为内存存储，重启后数据会丢失；后续会接入数据库与持久化。
+
 ## 构建与启动
 
 - 构建后端：
