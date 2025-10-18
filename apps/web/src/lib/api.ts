@@ -20,3 +20,12 @@ export type Stats = {
   fail: number;
   successRate: number;
 };
+
+export type ApiKey = {
+  id: string;
+  name: string;
+  key: string;
+  enabled: boolean;
+  rateLimitPerMin: number;
+  createdAt: string;
+};
