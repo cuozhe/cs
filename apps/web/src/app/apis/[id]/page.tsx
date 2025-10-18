@@ -10,7 +10,15 @@ import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
 import Stack from '@mui/material/Stack';
 import Divider from '@mui/material/Divider';
-import { ApiItem, getApiBaseUrl } from '@/lib/api';
+import Button from '@mui/material/Button';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
+import TextField from '@mui/material/TextField';
+import MenuItem from '@mui/material/MenuItem';
+import { DataGrid, GridColDef } from '@mui/x-data-grid';
+import { ApiChangeLog, ApiItem, RequestLog, getApiBaseUrl } from '@/lib/api';
 
 function StatusChip({ status }: { status: string }) {
   const color = status.includes('异常') ? 'error' : status.includes('收费') ? 'warning' : 'success';
@@ -24,6 +32,17 @@ export default function ApiDetailPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [tab, setTab] = React.useState(0);
+
+  const [statusDefs, setStatusDefs] = React.useState<string[]>(['正常', '异常', '收费']);
+  const [openStatus, setOpenStatus] = React.useState(false);
+  const [targetStatus, setTargetStatus] = React.useState('正常');
+  const [remark, setRemark] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+
+  const [opLogs, setOpLogs] = React.useState<ApiChangeLog[]>([]);
+  const [loadingOpLogs, setLoadingOpLogs] = React.useState(false);
+  const [failLogs, setFailLogs] = React.useState<RequestLog[]>([]);
+  const [loadingFailLogs, setLoadingFailLogs] = React.useState(false);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -45,6 +64,99 @@ export default function ApiDetailPage() {
     return () => controller.abort();
   }, [id]);
 
+  React.useEffect(() => {
+    async function loadDefs() {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/settings/status-def`);
+        if (res.ok) {
+          const defs = (await res.json()) as any[];
+          setStatusDefs(defs.map((d) => d.name));
+        }
+      } catch {}
+    }
+    loadDefs();
+  }, []);
+
+  const submitStatus = async () => {
+    if (!data) return;
+    try {
+      setSaving(true);
+      const res = await fetch(`${getApiBaseUrl()}/apis/${data.id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: targetStatus, remark }),
+      });
+      if (!res.ok) throw new Error(`变更失败: ${res.status}`);
+      const updated = (await res.json()) as ApiItem;
+      setData(updated);
+      setOpenStatus(false);
+      setRemark('');
+      setTargetStatus(updated.status);
+      // reload logs
+      loadOpLogs();
+    } catch (e: any) {
+      setError(e.message ?? '变更失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const loadOpLogs = React.useCallback(async () => {
+    if (!id) return;
+    try {
+      setLoadingOpLogs(true);
+      const res = await fetch(`${getApiBaseUrl()}/apis/${id}/logs?limit=200`);
+      if (!res.ok) throw new Error(`日志加载失败: ${res.status}`);
+      setOpLogs((await res.json()) as ApiChangeLog[]);
+    } catch (e: any) {
+      setError(e.message ?? '日志加载失败');
+    } finally {
+      setLoadingOpLogs(false);
+    }
+  }, [id]);
+
+  const loadFailLogs = React.useCallback(async () => {
+    if (!id) return;
+    try {
+      setLoadingFailLogs(true);
+      const res = await fetch(`${getApiBaseUrl()}/logs?apiId=${id}&success=false&limit=200`);
+      if (!res.ok) throw new Error(`失败记录加载失败: ${res.status}`);
+      setFailLogs((await res.json()) as RequestLog[]);
+    } catch (e: any) {
+      setError(e.message ?? '失败记录加载失败');
+    } finally {
+      setLoadingFailLogs(false);
+    }
+  }, [id]);
+
+  React.useEffect(() => {
+    if (tab === 3) loadFailLogs();
+    if (tab === 4) loadOpLogs();
+  }, [tab, loadFailLogs, loadOpLogs]);
+
+  const opLogCols = React.useMemo<GridColDef<ApiChangeLog>[]>(
+    () => [
+      { field: 'ts', headerName: '时间', width: 180, valueGetter: (p) => new Date(p.row.ts).toLocaleString() },
+      { field: 'action', headerName: '动作', width: 140 },
+      { field: 'oldStatus', headerName: '旧状态', width: 120, valueGetter: (p) => p.row.oldStatus ?? '-' },
+      { field: 'newStatus', headerName: '新状态', width: 120, valueGetter: (p) => p.row.newStatus ?? '-' },
+      { field: 'remark', headerName: '备注', flex: 1, minWidth: 200, valueGetter: (p) => p.row.remark ?? '-' },
+    ],
+    []
+  );
+
+  const failCols = React.useMemo<GridColDef<RequestLog>[]>(
+    () => [
+      { field: 'ts', headerName: '时间', width: 180, valueGetter: (p) => new Date(p.row.ts).toLocaleString() },
+      { field: 'method', headerName: '方法', width: 110 },
+      { field: 'apiPath', headerName: '路径', flex: 1, minWidth: 220 },
+      { field: 'statusCode', headerName: '状态码', width: 120 },
+      { field: 'ip', headerName: '来源 IP', width: 160 },
+      { field: 'message', headerName: '错误', flex: 1, minWidth: 200, valueGetter: (p) => p.row.message ?? '-' },
+    ],
+    []
+  );
+
   return (
     <Box>
       <Paper sx={{ p: 2, mb: 2 }}>
@@ -55,12 +167,17 @@ export default function ApiDetailPage() {
           {data && <StatusChip status={data.status} />}
           <Box sx={{ flexGrow: 1 }} />
           {data && (
-            <Chip
-              variant="outlined"
-              size="small"
-              label={`${data.method.toUpperCase()} ${data.path}`}
-              color={data.method.toUpperCase() === 'GET' ? 'default' : data.method.toUpperCase() === 'POST' ? 'primary' : 'warning'}
-            />
+            <>
+              <Chip
+                variant="outlined"
+                size="small"
+                label={`${data.method.toUpperCase()} ${data.path}`}
+                color={data.method.toUpperCase() === 'GET' ? 'default' : data.method.toUpperCase() === 'POST' ? 'primary' : 'warning'}
+              />
+              <Button size="small" variant="outlined" onClick={() => { setTargetStatus(data.status); setOpenStatus(true); }}>
+                变更状态
+              </Button>
+            </>
           )}
         </Stack>
       </Paper>
@@ -93,13 +210,27 @@ export default function ApiDetailPage() {
           </Box>
         )}
         {tab === 3 && (
-          <Box>
-            <Typography color="text.secondary">失败记录列表占位。</Typography>
+          <Box sx={{ height: 480 }}>
+            <DataGrid
+              rows={failLogs}
+              columns={failCols}
+              getRowId={(r) => r.id}
+              loading={loadingFailLogs}
+              pageSizeOptions={[10, 25, 50]}
+              initialState={{ pagination: { paginationModel: { pageSize: 10, page: 0 } } }}
+            />
           </Box>
         )}
         {tab === 4 && (
-          <Box>
-            <Typography color="text.secondary">操作日志占位。</Typography>
+          <Box sx={{ height: 480 }}>
+            <DataGrid
+              rows={opLogs}
+              columns={opLogCols}
+              getRowId={(r) => r.id}
+              loading={loadingOpLogs}
+              pageSizeOptions={[10, 25, 50]}
+              initialState={{ pagination: { paginationModel: { pageSize: 10, page: 0 } } }}
+            />
           </Box>
         )}
         {error && (
@@ -108,6 +239,28 @@ export default function ApiDetailPage() {
           </Typography>
         )}
       </Paper>
+
+      <Dialog open={openStatus} onClose={() => setOpenStatus(false)} fullWidth maxWidth="xs">
+        <DialogTitle>变更状态</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField select label="目标状态" value={targetStatus} onChange={(e) => setTargetStatus(e.target.value)}>
+              {statusDefs.map((s) => (
+                <MenuItem key={s} value={s}>
+                  {s}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField label="备注" value={remark} onChange={(e) => setRemark(e.target.value)} multiline minRows={2} />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenStatus(false)}>取消</Button>
+          <Button onClick={submitStatus} variant="contained" disabled={saving}>
+            {saving ? '提交中…' : '提交'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

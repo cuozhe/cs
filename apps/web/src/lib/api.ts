@@ -29,3 +29,28 @@ export type ApiKey = {
   rateLimitPerMin: number;
   createdAt: string;
 };
+
+export type ApiChangeLog = {
+  id: string;
+  ts: string;
+  apiId: string;
+  actor: string;
+  action: 'status_change' | 'create' | 'update' | 'delete';
+  oldStatus?: string | null;
+  newStatus?: string | null;
+  remark?: string;
+};
+
+export type RequestLog = {
+  id: string;
+  ts: string;
+  apiId: string | null;
+  apiName: string | null;
+  apiPath: string | null;
+  method: string;
+  statusCode: number;
+  success: boolean;
+  ip: string;
+  apiKeyId: string | null;
+  message?: string;
+};

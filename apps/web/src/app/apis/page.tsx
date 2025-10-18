@@ -27,6 +27,9 @@ export default function ApisPage() {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [form, setForm] = React.useState({ name: '', method: 'GET', path: '', status: '正常' });
   const [creating, setCreating] = React.useState(false);
+  const [importOpen, setImportOpen] = React.useState(false);
+  const [specText, setSpecText] = React.useState('');
+  const [importing, setImporting] = React.useState(false);
 
   // Sync query from URL
   React.useEffect(() => {
@@ -122,6 +125,26 @@ export default function ApisPage() {
     }
   };
 
+  const submitImport = async () => {
+    try {
+      setImporting(true);
+      const res = await fetch(`${getApiBaseUrl()}/apis/import-openapi`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: specText }),
+      });
+      if (!res.ok) throw new Error(`导入失败: ${res.status}`);
+      const data = (await res.json()) as { created: ApiItem[] };
+      if (data.created?.length) setRows((prev) => [...data.created, ...prev]);
+      setImportOpen(false);
+      setSpecText('');
+    } catch (e: any) {
+      setError(e.message ?? '导入失败');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <Box>
       <Typography variant="h5" gutterBottom>
@@ -137,7 +160,9 @@ export default function ApisPage() {
             sx={{ maxWidth: 360 }}
           />
           <Box sx={{ flexGrow: 1 }} />
-          <Button variant="outlined">导入 OpenAPI 文档</Button>
+          <Button variant="outlined" onClick={() => setImportOpen(true)}>
+            导入 OpenAPI 文档
+          </Button>
           <Button variant="contained" onClick={() => setCreateOpen(true)}>
             新建 API
           </Button>
@@ -211,6 +236,29 @@ export default function ApisPage() {
           <Button onClick={() => setCreateOpen(false)}>取消</Button>
           <Button onClick={submitCreate} variant="contained" disabled={creating || !form.name || !form.path}>
             {creating ? '创建中...' : '创建'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={importOpen} onClose={() => setImportOpen(false)} fullWidth maxWidth="md">
+        <DialogTitle>导入 OpenAPI 文档</DialogTitle>
+        <DialogContent dividers>
+          <Typography color="text.secondary" sx={{ mb: 1 }}>
+            粘贴 OpenAPI/Swagger JSON 文本，系统将解析 paths 并批量创建 API（支持 GET/POST/PUT/DELETE）。
+          </Typography>
+          <TextField
+            label="OpenAPI JSON"
+            value={specText}
+            onChange={(e) => setSpecText(e.target.value)}
+            multiline
+            minRows={12}
+            fullWidth
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setImportOpen(false)}>取消</Button>
+          <Button onClick={submitImport} variant="contained" disabled={importing || !specText.trim()}>
+            {importing ? '导入中…' : '导入'}
           </Button>
         </DialogActions>
       </Dialog>

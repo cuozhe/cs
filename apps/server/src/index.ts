@@ -52,10 +52,21 @@ export type RequestLog = {
   message?: string;
 };
 
+export type ApiChangeLog = {
+  id: string;
+  ts: string;
+  apiId: string;
+  actor: string; // placeholder actor id or name
+  action: 'status_change' | 'create' | 'update' | 'delete';
+  oldStatus?: string | null;
+  newStatus?: string | null;
+  remark?: string;
+};
+
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 app.use(morgan('dev'));
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
@@ -106,6 +117,7 @@ const apiKeys: ApiKey[] = [
 
 const rateBuckets = new Map<string, { windowStart: number; count: number }>();
 const logs: RequestLog[] = [];
+const apiChangeLogs: ApiChangeLog[] = [];
 
 // Helpers
 function computeSuccessRate(s: { success: number; fail: number; totalCalls?: number }): number {
@@ -137,7 +149,17 @@ function logRequest(partial: Omit<RequestLog, 'id' | 'ts'>) {
     ...partial,
   };
   logs.unshift(item);
-  if (logs.length > 1000) logs.pop();
+  if (logs.length > 2000) logs.pop();
+}
+
+function logApiChange(change: Omit<ApiChangeLog, 'id' | 'ts'>) {
+  const item: ApiChangeLog = {
+    id: `op_${apiChangeLogs.length + 1}`,
+    ts: new Date().toISOString(),
+    ...change,
+  };
+  apiChangeLogs.unshift(item);
+  if (apiChangeLogs.length > 2000) apiChangeLogs.pop();
 }
 
 // Routes
@@ -176,7 +198,8 @@ app.post('/apis', (req: Request, res: Response) => {
     status: status ? String(status) : '正常',
     lastCalledAt: null,
   };
-  apis.push(item);
+  apis.unshift(item);
+  logApiChange({ apiId: item.id, actor: 'system', action: 'create', newStatus: item.status });
   res.status(201).json(item);
 });
 
@@ -196,7 +219,81 @@ app.put('/apis/:id', (req: Request, res: Response) => {
     ...(lastCalledAt !== undefined ? { lastCalledAt: lastCalledAt ? String(lastCalledAt) : null } : {}),
   };
   apis[idx] = updated;
+  logApiChange({ apiId: updated.id, actor: 'system', action: 'update' });
   res.json(updated);
+});
+
+// Change API status with remark
+app.post('/apis/:id/status', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const idx = apis.findIndex((a) => a.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'API not found' });
+  const { status, remark } = req.body ?? {};
+  if (!status) return res.status(400).json({ error: 'Missing required field: status' });
+  const allowed = new Set(statusDefs.map((s) => s.name));
+  if (!allowed.has(String(status))) {
+    return res.status(400).json({ error: `Invalid status: ${status}` });
+  }
+  const old = apis[idx].status;
+  apis[idx].status = String(status);
+  logApiChange({ apiId: apis[idx].id, actor: 'system', action: 'status_change', oldStatus: old, newStatus: apis[idx].status, remark });
+  res.json(apis[idx]);
+});
+
+// Delete API
+app.delete('/apis/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const idx = apis.findIndex((a) => a.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'API not found' });
+  const removed = apis.splice(idx, 1)[0];
+  logApiChange({ apiId: removed.id, actor: 'system', action: 'delete', oldStatus: removed.status });
+  res.json({ ok: true });
+});
+
+// Import OpenAPI/Swagger basic
+app.post('/apis/import-openapi', (req: Request, res: Response) => {
+  let spec: any = (req.body as any)?.spec ?? (req.body as any)?.openapi ?? null;
+  if (!spec && typeof (req.body as any)?.text === 'string') {
+    try {
+      spec = JSON.parse((req.body as any).text);
+    } catch (e) {
+      return res.status(400).json({ error: 'Invalid JSON text' });
+    }
+  }
+  if (!spec || typeof spec !== 'object') {
+    return res.status(400).json({ error: 'Missing spec' });
+  }
+  const paths = spec.paths || {};
+  const created: ApiItem[] = [];
+  const skipped: { method: string; path: string }[] = [];
+  const methods = ['get', 'post', 'put', 'delete'];
+  for (const rawPath of Object.keys(paths)) {
+    for (const m of methods) {
+      const def = paths[rawPath]?.[m];
+      if (!def) continue;
+      const method = m.toUpperCase();
+      const path = String(rawPath).replace(/\{([^}]+)\}/g, ':$1');
+      // avoid duplicate
+      const exists = apis.some((a) => a.method.toUpperCase() === method && a.path === path);
+      if (exists) {
+        skipped.push({ method, path });
+        continue;
+      }
+      const name = def.summary || `${method} ${rawPath}`;
+      const item: ApiItem = {
+        id: genApiId(),
+        name: String(name),
+        method,
+        path,
+        status: '正常',
+        lastCalledAt: null,
+      };
+      apis.unshift(item);
+      logApiChange({ apiId: item.id, actor: 'system', action: 'create', newStatus: item.status, remark: 'import-openapi' });
+      created.push(item);
+    }
+  }
+  res.json({ created, skipped });
 });
 
 // API Keys
@@ -233,10 +330,32 @@ app.get('/stats', (_req: Request, res: Response) => {
   res.json(stats);
 });
 
-// Logs
+// Logs with filters
 app.get('/logs', (req: Request, res: Response) => {
   const limit = req.query.limit ? Math.max(1, Math.min(1000, Number(req.query.limit))) : 100;
-  res.json(logs.slice(0, limit));
+  let result = logs;
+  if (typeof req.query.apiId === 'string') {
+    result = result.filter((l) => l.apiId === req.query.apiId);
+  }
+  if (typeof req.query.success === 'string') {
+    const s = req.query.success.toLowerCase();
+    if (s === 'true' || s === 'false') {
+      result = result.filter((l) => l.success === (s === 'true'));
+    }
+  }
+  if (typeof req.query.code === 'string') {
+    const code = Number(req.query.code);
+    if (!Number.isNaN(code)) result = result.filter((l) => l.statusCode === code);
+  }
+  res.json(result.slice(0, limit));
+});
+
+// API change logs
+app.get('/apis/:id/logs', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const limit = req.query.limit ? Math.max(1, Math.min(1000, Number(req.query.limit))) : 100;
+  const items = apiChangeLogs.filter((l) => l.apiId === id).slice(0, limit);
+  res.json(items);
 });
 
 // Users (placeholder)
