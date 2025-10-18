@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { createTheme, CssBaseline, ThemeProvider } from '@mui/material';
 import AppBar from '@mui/material/AppBar';
 import Toolbar from '@mui/material/Toolbar';
@@ -9,6 +10,7 @@ import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
+import SearchIcon from '@mui/icons-material/Search';
 import Box from '@mui/material/Box';
 import Drawer from '@mui/material/Drawer';
 import List from '@mui/material/List';
@@ -17,6 +19,8 @@ import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import Divider from '@mui/material/Divider';
+import TextField from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import ApiIcon from '@mui/icons-material/Api';
 import InsightsIcon from '@mui/icons-material/Insights';
@@ -37,6 +41,9 @@ const navItems = [
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const prefersDark = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
   const [mode, setMode] = React.useState<'light' | 'dark'>(prefersDark ? 'dark' : 'light');
+  const [query, setQuery] = React.useState('');
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const router = useRouter();
 
   React.useEffect(() => {
     const stored = typeof window !== 'undefined' ? window.localStorage.getItem('theme') : null;
@@ -51,6 +58,27 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     if (typeof window !== 'undefined') window.localStorage.setItem('theme', next);
   };
 
+  const onSubmitSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = query.trim();
+    if (!q) return;
+    router.push(`/apis?query=${encodeURIComponent(q)}`);
+  };
+
+  React.useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === '/') {
+        const tag = (document.activeElement?.tagName || '').toUpperCase();
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+          ev.preventDefault();
+          inputRef.current?.focus();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   return (
     <html lang="zh-CN">
       <body>
@@ -63,6 +91,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <Typography variant="h6" noWrap sx={{ flexGrow: 1 }}>
                   API 管理系统
                 </Typography>
+                <Box component="form" onSubmit={onSubmitSearch} sx={{ mr: 1 }}>
+                  <TextField
+                    inputRef={inputRef}
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    size="small"
+                    placeholder="搜索 API/用户/订单（按 / 聚焦）"
+                    sx={{ minWidth: { xs: 140, sm: 220, md: 320 } }}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <SearchIcon fontSize="small" />
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                </Box>
                 <IconButton color="inherit" onClick={toggleTheme} aria-label="切换主题">
                   {mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
                 </IconButton>

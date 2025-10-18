@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Paper from '@mui/material/Paper';
@@ -8,14 +10,29 @@ import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import Stack from '@mui/material/Stack';
 import Chip from '@mui/material/Chip';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
+import MenuItem from '@mui/material/MenuItem';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
 import { ApiItem, getApiBaseUrl } from '@/lib/api';
 
 export default function ApisPage() {
+  const searchParams = useSearchParams();
   const [rows, setRows] = React.useState<ApiItem[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState('');
+  const [createOpen, setCreateOpen] = React.useState(false);
+  const [form, setForm] = React.useState({ name: '', method: 'GET', path: '', status: '正常' });
+  const [creating, setCreating] = React.useState(false);
+
+  // Sync query from URL
+  React.useEffect(() => {
+    const q = searchParams?.get('query') || '';
+    setQuery(q);
+  }, [searchParams]);
 
   const filtered = React.useMemo(() => {
     if (!query) return rows;
@@ -69,9 +86,41 @@ export default function ApisPage() {
         },
       },
       { field: 'lastCalledAt', headerName: '最近调用时间', width: 180, valueFormatter: (p) => p.value ?? '-' },
+      {
+        field: 'actions',
+        headerName: '操作',
+        width: 120,
+        sortable: false,
+        filterable: false,
+        renderCell: (params) => (
+          <Button component={Link} href={`/apis/${params.row.id}`} size="small">
+            查看
+          </Button>
+        ),
+      },
     ],
     []
   );
+
+  const submitCreate = async () => {
+    try {
+      setCreating(true);
+      const res = await fetch(`${getApiBaseUrl()}/apis`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) throw new Error(`创建失败: ${res.status}`);
+      const item = (await res.json()) as ApiItem;
+      setRows((prev) => [item, ...prev]);
+      setCreateOpen(false);
+      setForm({ name: '', method: 'GET', path: '', status: '正常' });
+    } catch (e: any) {
+      setError(e.message ?? '创建失败');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   return (
     <Box>
@@ -89,7 +138,9 @@ export default function ApisPage() {
           />
           <Box sx={{ flexGrow: 1 }} />
           <Button variant="outlined">导入 OpenAPI 文档</Button>
-          <Button variant="contained">新建 API</Button>
+          <Button variant="contained" onClick={() => setCreateOpen(true)}>
+            新建 API
+          </Button>
         </Stack>
       </Paper>
       <Paper sx={{ height: 520, width: '100%' }}>
@@ -112,6 +163,57 @@ export default function ApisPage() {
           {error}
         </Typography>
       )}
+
+      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>新建 API</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="名称"
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              required
+            />
+            <TextField
+              label="请求方式"
+              select
+              value={form.method}
+              onChange={(e) => setForm((f) => ({ ...f, method: e.target.value }))}
+              required
+            >
+              {['GET', 'POST', 'PUT', 'DELETE'].map((m) => (
+                <MenuItem key={m} value={m}>
+                  {m}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              label="请求地址（Path）"
+              value={form.path}
+              onChange={(e) => setForm((f) => ({ ...f, path: e.target.value }))}
+              required
+            />
+            <TextField
+              label="状态"
+              select
+              value={form.status}
+              onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
+            >
+              {['正常', '异常', '收费'].map((s) => (
+                <MenuItem key={s} value={s}>
+                  {s}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCreateOpen(false)}>取消</Button>
+          <Button onClick={submitCreate} variant="contained" disabled={creating || !form.name || !form.path}>
+            {creating ? '创建中...' : '创建'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
