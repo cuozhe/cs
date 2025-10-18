@@ -8,3 +8,4 @@ API 管理系统设计方案（Material UI 风格）
 
 请查看以下文档获取完整方案：
 - docs/api-management-system-design-zh.md
+- docs/DEVELOPMENT.md（开发指南）

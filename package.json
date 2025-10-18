@@ -1,0 +1,16 @@
+{
+  "name": "api-management-system",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:server": "npm --workspace @app/server run dev",
+    "dev:web": "npm --workspace @app/web run dev",
+    "build:server": "npm --workspace @app/server run build",
+    "build:web": "npm --workspace @app/web run build",
+    "start:server": "npm --workspace @app/server run start",
+    "start:web": "npm --workspace @app/web run start"
+  }
+}
