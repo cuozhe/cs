@@ -13,3 +13,10 @@ export type ApiItem = {
   status: string;
   lastCalledAt: string | null;
 };
+
+export type Stats = {
+  totalCalls: number;
+  success: number;
+  fail: number;
+  successRate: number;
+};
